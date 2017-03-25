@@ -2,6 +2,7 @@
 
 namespace Krizalys\Onedrive;
 
+use Krizalys\Onedrive\Http\Client\ClientInterface as HttpClientInterface;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
 
@@ -185,6 +186,8 @@ class Client
     /**
      * Constructor.
      *
+     * @param HttpClientInterface $httpClient
+     *
      * @param array $options The options to use while creating this object.
      *                       Valid supported keys are:
      *                       - 'state' (object) When defined, it should contain
@@ -211,8 +214,10 @@ class Client
      *                       big files.
      *                       Default: StreamBackEnd::MEMORY.
      */
-    public function __construct(array $options = array())
-    {
+    public function __construct(
+        HttpClientInterface $httpClient,
+        array $options = array()
+    ) {
         $this->_clientId = array_key_exists('client_id', $options)
             ? (string) $options['client_id'] : null;
 

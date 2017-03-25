@@ -3,6 +3,8 @@
 namespace Test\Functional\Krizalys;
 
 use Krizalys\Onedrive\Client;
+use Krizalys\Onedrive\Http\Client\Client as HttpClient;
+use Krizalys\Onedrive\Http\ClientAdapter\CurlClientAdapter as HttpCurlClientAdapter;
 
 /**
  * @group functional
@@ -105,9 +107,15 @@ EOF;
         $config = require $config;
         $url    = sprintf('http://localhost:%u/', self::PORT);
 
-        $client = new Client(array(
-            'client_id' => $config['CLIENT_ID'],
-        ), $url);
+        $client = new Client(
+            new HttpClient(
+                new HttpCurlClientAdapter()
+            ),
+            array(
+                'client_id' => $config['CLIENT_ID'],
+            ),
+            $url
+        );
 
         try {
             $code = self::getAuthenticationCode($client);
