@@ -221,6 +221,15 @@ class Client
         HttpClientInterface $httpClient,
         array $options = array()
     ) {
+        /** @todo DI. */
+        $adapter = new \Krizalys\Onedrive\Http\ClientAdapter\CurlClientAdapter(array(
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_AUTOREFERER    => true,
+        ));
+
+        /** @todo DI. */
+        $this->httpClient = new \Krizalys\Onedrive\Http\Client\Client($adapter);
+
         $this->_clientId = array_key_exists('client_id', $options)
             ? (string) $options['client_id'] : null;
 
