@@ -4,6 +4,8 @@ namespace Krizalys\Onedrive;
 
 use Krizalys\Onedrive\Http\Client\ClientInterface as HttpClientInterface;
 use Krizalys\Onedrive\Http\Response\ResponseInterface as HttpResponseInterface;
+use Krizalys\Onedrive\Http\Resource\Resource as HttpResource;
+use Krizalys\Onedrive\Http\Resource\StreamResource as HttpStreamResource;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
 
@@ -569,12 +571,18 @@ class Client
      */
     public function apiGet($path, $options = array())
     {
-        $url = self::API_URL . $path
+        $path = static::API_BASE_PATH . $path
+            . '?access_token=' . urlencode($this->_state->token->data->access_token);
+
+        $response = $this->httpClient->get(static::API_HOST, $path);
+
+        return $this->handleResponse($response);
+        /*$url = self::API_URL . $path
             . '?access_token=' . urlencode($this->_state->token->data->access_token);
 
         $curl = self::_createCurl($path, $options);
         curl_setopt($curl, CURLOPT_URL, $url);
-        return $this->_processResult($curl);
+        return $this->_processResult($curl);*/
     }
 
     /**
@@ -587,7 +595,21 @@ class Client
      */
     public function apiPost($path, $data)
     {
-        $url  = self::API_URL . $path;
+        $headers = array(
+            // The data is sent as JSON as per OneDrive documentation.
+            'Content-Type: application/json',
+
+            'Authorization: Bearer ' . $this->_state->token->data->access_token,
+        );
+
+        $data     = (object) $data;
+        $json     = json_encode($data);
+        $body     = new HttpResource($json, 'application/json');
+        $path     = static::API_BASE_PATH . $path;
+        $response = $this->httpClient->post(static::API_HOST, $path, $body, $headers);
+
+        return $this->handleResponse($response);
+        /*$url  = self::API_URL . $path;
         $data = (object) $data;
         $curl = self::_createCurl($path);
 
@@ -605,7 +627,7 @@ class Client
             CURLOPT_POSTFIELDS => json_encode($data),
         ));
 
-        return $this->_processResult($curl);
+        return $this->_processResult($curl);*/
     }
 
     /**
@@ -620,7 +642,20 @@ class Client
      */
     public function apiPut($path, $stream, $contentType = null)
     {
-        $url   = self::API_URL . $path;
+        $headers = array(
+            'Authorization: Bearer ' . $this->_state->token->data->access_token,
+        );
+
+        if (null !== $contentType) {
+            $headers[] = 'Content-Type: ' . $contentType;
+        }
+
+        $body     = new HttpStreamResource($stream, $contentType);
+        $path     = static::API_BASE_PATH . $path;
+        $response = $this->httpClient->put(static::API_HOST, $path, $body, $headers);
+
+        return $this->handleResponse($response);
+        /*$url   = self::API_URL . $path;
         $curl  = self::_createCurl($path);
         $stats = fstat($stream);
 
@@ -641,7 +676,7 @@ class Client
         );
 
         curl_setopt_array($curl, $options);
-        return $this->_processResult($curl);
+        return $this->_processResult($curl);*/
     }
 
     /**
@@ -653,7 +688,13 @@ class Client
      */
     public function apiDelete($path)
     {
-        $url = self::API_URL . $path
+        $path = static::API_BASE_PATH . $path
+            . '?access_token=' . urlencode($this->_state->token->data->access_token);
+
+        $response = $this->httpClient->delete(static::API_HOST, $path);
+
+        return $this->handleResponse($response);
+        /*$url = self::API_URL . $path
             . '?access_token=' . urlencode($this->_state->token->data->access_token);
 
         $curl = self::_createCurl($path);
@@ -663,7 +704,7 @@ class Client
             CURLOPT_CUSTOMREQUEST => 'DELETE',
         ));
 
-        return $this->_processResult($curl);
+        return $this->_processResult($curl);*/
     }
 
     /**
@@ -676,7 +717,21 @@ class Client
      */
     public function apiMove($path, $data)
     {
-        $url  = self::API_URL . $path;
+        $headers = array(
+            // The data is sent as JSON as per OneDrive documentation.
+            'Content-Type: application/json',
+
+            'Authorization: Bearer ' . $this->_state->token->data->access_token,
+        );
+
+        $data     = (object) $data;
+        $json     = json_encode($data);
+        $body     = new HttpResource($json, 'application/json');
+        $path     = static::API_BASE_PATH . $path;
+        $response = $this->httpClient->request(static::API_HOST, 'MOVE', $path, $body, $headers);
+
+        return $this->handleResponse($response);
+        /*$url  = self::API_URL . $path;
         $data = (object) $data;
         $curl = self::_createCurl($path);
 
@@ -694,7 +749,7 @@ class Client
             CURLOPT_POSTFIELDS    => json_encode($data),
         ));
 
-        return $this->_processResult($curl);
+        return $this->_processResult($curl);*/
     }
 
     /**
@@ -707,7 +762,21 @@ class Client
      */
     public function apiCopy($path, $data)
     {
-        $url  = self::API_URL . $path;
+        $headers = array(
+            // The data is sent as JSON as per OneDrive documentation.
+            'Content-Type: application/json',
+
+            'Authorization: Bearer ' . $this->_state->token->data->access_token,
+        );
+
+        $data     = (object) $data;
+        $json     = json_encode($data);
+        $body     = new HttpResource($json, 'application/json');
+        $path     = static::API_BASE_PATH . $path;
+        $response = $this->httpClient->request(static::API_HOST, 'COPY', $path, $body, $headers);
+
+        return $this->handleResponse($response);
+        /*$url  = self::API_URL . $path;
         $data = (object) $data;
         $curl = self::_createCurl($path);
 
@@ -725,7 +794,7 @@ class Client
             CURLOPT_POSTFIELDS    => json_encode($data),
         ));
 
-        return $this->_processResult($curl);
+        return $this->_processResult($curl);*/
     }
 
     /**
