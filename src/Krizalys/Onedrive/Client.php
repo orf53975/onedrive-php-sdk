@@ -3,6 +3,7 @@
 namespace Krizalys\Onedrive;
 
 use Krizalys\Onedrive\Http\Client\ClientInterface as HttpClientInterface;
+use Krizalys\Onedrive\Http\Response\ResponseInterface as HttpResponseInterface;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
 
@@ -181,6 +182,42 @@ class Client
         if (array_key_exists('error', $vars)) {
             throw new \Exception($decoded->error->message,
                 (int) $decoded->error->code);
+        }
+
+        return $decoded;
+    }
+
+    /**
+     * @param HttpResponseInterface $response
+     *        The response.
+     *
+     * @return mixed
+     *         The handled response.
+     */
+    private function handleResponse(HttpResponseInterface $response)
+    {
+        $body        = $response->getBody();
+        $contentType = $body->getContentType();
+        $content     = $body->getContent();
+        $contents    = stream_get_contents($content);
+
+        // Parse nothing but JSON.
+        if (1 !== preg_match('|^application/json|', $contentType)) {
+            return $contents;
+        }
+
+        // Empty JSON string is returned as an empty object.
+        if ('' == $contents) {
+            return (object) array();
+        }
+
+        $decoded = json_decode($contents);
+
+        if (property_exists($decoded, 'error')) {
+            throw new \Exception(
+                $decoded->error->message,
+                (int) $decoded->error->code
+            );
         }
 
         return $decoded;
