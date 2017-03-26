@@ -30,6 +30,9 @@ class Client
      */
     const API_URL = 'https://apis.live.net/v5.0/';
 
+    const API_HOST = 'apis.live.net';
+    const API_BASE_PATH = '/v5.0/';
+
     /**
      * @var string The base URL for authorization requests.
      */
