@@ -10,7 +10,8 @@ php:
 
 before_install: composer install
 
-script: ./vendor/bin/phpunit --configuration test/unit --coverage-clover coverage.xml
-
-after_success:
-    - 'bash <(curl --silent https://codecov.io/bash)'
+script:
+    - ./vendor/bin/phpunit --configuration test/unit --coverage-clover coverage.xml
+    - 'bash <(curl --silent https://codecov.io/bash) -cF unit'
+    - ./vendor/bin/phpunit --configuration test/integration --coverage-clover coverage.xml
+    - 'bash <(curl --silent https://codecov.io/bash) -cF integration'
