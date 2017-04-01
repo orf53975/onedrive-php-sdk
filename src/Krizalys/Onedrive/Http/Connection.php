@@ -37,16 +37,28 @@ class Connection
         $this->secure = (bool) $secure;
     }
 
+    /**
+     * @return string
+     *         The host.
+     */
     public function getHost()
     {
         return $this->host;
     }
 
+    /**
+     * @return int
+     *         The port.
+     */
     public function getPort()
     {
         return $this->port;
     }
 
+    /**
+     * @return bool
+     *         The secure toggle.
+     */
     public function isSecure()
     {
         return $this->secure;
