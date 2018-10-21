@@ -41,7 +41,7 @@ EOF;
             'stream_back_end' => StreamBackEnd::TEMP,
         ]);
 
-        $code = self::getAuthenticationCode(
+        $code = self::getAuthenticationCodeWithManualLogIn/*getAuthenticationCode*/(
             $client,
             $config['CLIENT_ID'],
             $config['USERNAME'],
@@ -230,6 +230,16 @@ EOF;
         }, $root->fetchChildDriveItems());
 
         $this->assertFalse(in_array($folder2->getId(), $children));
+    }
+
+    private static function getAuthenticationCodeWithManualLogIn(Client $client, $clientId, $username, $password)
+    {
+        $redirectUri = sprintf('http://localhost:%d/', self::PORT);
+        $logInUrl    = $client->getLogInUrl(['wl.skydrive_update'], $redirectUri);
+        echo "1. Visit $logInUrl\n";
+        echo "2. Log in using your credentials ($username, $password)\n";
+        echo "3. Paste the code in the query string\n";
+        return readline("> ");
     }
 
     private static function getAuthenticationCode(Client $client, $clientId, $username, $password)
