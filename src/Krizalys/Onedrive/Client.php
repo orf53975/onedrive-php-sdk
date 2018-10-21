@@ -2,6 +2,12 @@
 
 namespace Krizalys\Onedrive;
 
+use GuzzleHttp\Client as GuzzleHttpClient;
+use GuzzleHttp\Psr7;
+use Krizalys\Onedrive\Proxy\DriveItemProxy;
+use Krizalys\Onedrive\Proxy\DriveProxy;
+use Microsoft\Graph\Graph;
+use Microsoft\Graph\Model;
 use Monolog\Handler\StreamHandler;
 use Monolog\Logger;
 
@@ -34,13 +40,23 @@ class Client
      * @var string
      *      The base URL for authorization requests.
      */
-    const AUTH_URL = 'https://login.live.com/oauth20_authorize.srf';
+    const AUTH_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 
     /**
      * @var string
      *      The base URL for token requests.
      */
-    const TOKEN_URL = 'https://login.live.com/oauth20_token.srf';
+    const TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+
+    /**
+     * @var GuzzleHttp\ClientInterface The Guzzle HTTP client.
+     */
+    private $httpClient;
+
+    /**
+     * @var Microsoft\Graph\Graph The Microsoft Graph.
+     */
+    public $graph;
 
     /**
      * @var string
@@ -227,6 +243,12 @@ class Client
      */
     public function __construct(array $options = [])
     {
+        $this->httpClient = new GuzzleHttpClient([
+            'base_uri' => 'https://graph.microsoft.com/v1.0/',
+        ]);
+
+        $this->graph = new Graph();
+
         $this->_clientId = array_key_exists('client_id', $options)
             ? (string) $options['client_id'] : null;
 
@@ -301,58 +323,55 @@ class Client
 
     /**
      * Gets the URL of the log in form. After login, the browser is redirected
-     * to the redirect URL, and a code is passed as a GET parameter to this URL.
+     * to the redirect URI, and a code is passed as a query string parameter to
+     * this URI.
      *
-     * The browser is also redirected to this URL if the user is already logged
-     * in.
+     * The browser is also redirected to the redirect URI if the user is already
+     * logged in.
      *
      * @param array $scopes
      *        The OneDrive scopes requested by the application. Supported
      *        values:
-     *          - 'wl.signin'
-     *          - 'wl.basic'
-     *          - 'wl.contacts_skydrive'
-     *          - 'wl.skydrive_update'
+     *          - 'offline_access'
+     *          - 'files.read'
+     *          - 'files.read.all'
+     *          - 'files.readwrite'
+     *          - 'files.readwrite.all'
      * @param string $redirectUri
      *        The URI to which to redirect to upon successful log in.
-     * @param array $options
-     *        Reserved for future use. Default: [].
      *
      * @return string
      *         The log in URL.
      *
      * @throws \Exception
      *         Thrown if this Client instance's clientId is not set.
-     *
-     * @todo Support $options.
      */
-    public function getLogInUrl(
-        array $scopes,
-        $redirectUri,
-        array $options = []
-    ) {
+    public function getLogInUrl(array $scopes, $redirectUri)
+    {
         if (null === $this->_clientId) {
             throw new \Exception(
                 'The client ID must be set to call getLogInUrl()'
             );
         }
 
-        $imploded                   = implode(',', $scopes);
         $redirectUri                = (string) $redirectUri;
         $this->_state->redirect_uri = $redirectUri;
 
-        // When using this URL, the browser will eventually be redirected to the
-        // callback URL with a code passed in the URL query string (the name of
-        // the variable is "code"). This is suitable for PHP.
-        $url = self::AUTH_URL
-            . '?client_id=' . urlencode($this->_clientId)
-            . '&scope=' . urlencode($imploded)
-            . '&response_type=code'
-            . '&redirect_uri=' . urlencode($redirectUri)
-            . '&display=popup'
-            . '&locale=en';
+        $values = [
+            'client_id'     => $this->_clientId,
+            'response_type' => 'code',
+            'redirect_uri'  => $redirectUri,
+            'scope'         => implode(' ', $scopes),
+            'response_mode' => 'query',
+        ];
 
-        return $url;
+        $query = http_build_query($values, '', '&', PHP_QUERY_RFC3986);
+
+        // When visiting this URL and authenticating successfully, the agent is
+        // redirected to the redirect URI, with a code passed in the query
+        // string (the name of the variable is "code"). This is suitable for
+        // PHP.
+        return self::AUTH_URL . "?$query";
     }
 
     /**
@@ -427,52 +446,23 @@ class Client
             );
         }
 
-        $url = self::TOKEN_URL;
+        $values = [
+            'client_id'     => $this->_clientId,
+            'redirect_uri'  => $this->_state->redirect_uri,
+            'client_secret' => (string) $clientSecret,
+            'code'          => (string) $code,
+            'grant_type'    => 'authorization_code',
+        ];
 
-        $curl = curl_init();
-
-        $fields = http_build_query(
-            [
-                'client_id'     => $this->_clientId,
-                'redirect_uri'  => $this->_state->redirect_uri,
-                'client_secret' => $clientSecret,
-                'code'          => $code,
-                'grant_type'    => 'authorization_code',
-            ]
+        $response = $this->httpClient->post(
+            self::TOKEN_URL,
+            ['form_params' => $values]
         );
 
-        curl_setopt_array($curl, [
-            // General options.
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_AUTOREFERER    => true,
-            CURLOPT_POST           => 1,
-            CURLOPT_POSTFIELDS     => $fields,
+        $body = $response->getBody();
+        $data = json_decode($body);
 
-            CURLOPT_HTTPHEADER => [
-                'Content-Length: ' . strlen($fields),
-            ],
-
-            // SSL options.
-            CURLOPT_SSL_VERIFYHOST => false,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_URL            => $url,
-        ]);
-
-        $result = curl_exec($curl);
-
-        if (false === $result) {
-            if (curl_errno($curl)) {
-                throw new \Exception('curl_setopt_array() failed: '
-                    . curl_error($curl));
-            } else {
-                throw new \Exception('curl_setopt_array(): empty response');
-            }
-        }
-
-        $decoded = json_decode($result);
-
-        if (null === $decoded) {
+        if (null === $data) {
             throw new \Exception('json_decode() failed');
         }
 
@@ -480,8 +470,10 @@ class Client
 
         $this->_state->token = (object) [
             'obtained' => time(),
-            'data'     => $decoded,
+            'data'     => $data,
         ];
+
+        $this->graph->setAccessToken($this->_state->token->data->access_token);
     }
 
     /**
@@ -580,41 +572,6 @@ class Client
     }
 
     /**
-     * Performs a call to the OneDrive API using the POST method.
-     *
-     * @param string $path
-     *        The path of the API call (eg. me/skydrive).
-     * @param array|object $data
-     *        The data to pass in the body of the request.
-     *
-     * @return object|string
-     *         The response body, if any.
-     */
-    public function apiPost($path, $data)
-    {
-        $url  = self::API_URL . $path;
-        $data = (object) $data;
-        $curl = self::_createCurl($path);
-
-        curl_setopt_array($curl, [
-            CURLOPT_URL        => $url,
-            CURLOPT_POST       => true,
-
-            CURLOPT_HTTPHEADER => [
-                // The data is sent as JSON as per OneDrive documentation.
-                'Content-Type: application/json',
-
-                'Authorization: Bearer '
-                    . $this->_state->token->data->access_token,
-            ],
-
-            CURLOPT_POSTFIELDS => json_encode($data),
-        ]);
-
-        return $this->_processResult($curl);
-    }
-
-    /**
      * Performs a call to the OneDrive API using the PUT method.
      *
      * @param string $path
@@ -651,33 +608,6 @@ class Client
         ];
 
         curl_setopt_array($curl, $options);
-        return $this->_processResult($curl);
-    }
-
-    /**
-     * Performs a call to the OneDrive API using the DELETE method.
-     *
-     * @param string $path
-     *        The path of the API call (eg. me/skydrive).
-     *
-     * @return object|string
-     *         The response body, if any.
-     */
-    public function apiDelete($path)
-    {
-        $url =
-            self::API_URL
-                . $path
-                . '?access_token='
-                . urlencode($this->_state->token->data->access_token);
-
-        $curl = self::_createCurl($path);
-
-        curl_setopt_array($curl, [
-            CURLOPT_URL           => $url,
-            CURLOPT_CUSTOMREQUEST => 'DELETE',
-        ]);
-
         return $this->_processResult($curl);
     }
 
@@ -752,6 +682,112 @@ class Client
     }
 
     /**
+     * @return array
+     *
+     */
+    public function getDrives()
+    {
+        $endpoint = '/me/drives';
+
+        $response = $this
+            ->graph
+            ->createCollectionRequest('GET', $endpoint)
+            ->execute();
+
+        $status = $response->getStatus();
+
+        if ($status != 200) {
+            throw new \Exception("Unexpected status code produced by 'GET $endpoint': $status");
+        }
+
+        $drives = $response->getResponseAsObject(Model\Drive::class);
+
+        return array_map(function (Model\Drive $drive) {
+            return new DriveProxy($this->graph, $drive);
+        }, $drives);
+    }
+
+    /**
+     * @param string $driveId
+     *
+     *
+     * @return DriveProxy
+     *
+     */
+    public function getDriveById($driveId)
+    {
+        $endpoint = "/drives/$driveId";
+
+        $response = $this
+            ->graph
+            ->createRequest('GET', $endpoint)
+            ->execute();
+
+        $status = $response->getStatus();
+
+        if ($status != 200) {
+            throw new \Exception();
+        }
+
+        $drive = $response->getResponseAsObject(Model\Drive::class);
+        return new DriveProxy($this->graph, $drive);
+    }
+
+    /**
+     * @param string $driveId
+     *
+     * @param string $itemId
+     *
+     *
+     * @return DriveProxy
+     *
+     */
+    public function getDriveItemById($driveId, $itemId)
+    {
+        $locator  = "items/$itemId";
+        $endpoint = "/drives/$driveId/$locator";
+
+        $response = $this
+            ->graph
+            ->createRequest('GET', $endpoint)
+            ->execute();
+
+        $status = $response->getStatus();
+
+        if ($status != 200) {
+            throw new \Exception();
+        }
+
+        $driveItem = $response->getResponseAsObject(Model\DriveItem::class);
+        return new DriveItemProxy($this->graph, $driveItem);
+    }
+
+    /**
+     * @return DriveItemProxy
+     *         The root drive item.
+     */
+    public function getRoot()
+    {
+        $locator  = 'root';
+        $endpoint = "/me/drive/$locator";
+
+        $response = $this
+            ->graph
+            ->createRequest('GET', $endpoint)
+            ->execute();
+
+        $status = $response->getStatus();
+
+        if ($status != 200) {
+            throw new \Exception("Unexpected status code produced by 'GET $endpoint': $status");
+        }
+
+        $driveItem = $response->getResponseAsObject(Model\DriveItem::class);
+        return new DriveItemProxy($this->graph, $driveItem);
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+    /**
      * Creates a folder in the current OneDrive account.
      *
      * @param string $name
@@ -770,21 +806,69 @@ class Client
      */
     public function createFolder($name, $parentId = null, $description = null)
     {
-        if (null === $parentId) {
-            $parentId = 'me/skydrive';
-        }
+        $parent = $parentId !== null ? "items/" . rawurlencode($parentId) : 'root';
 
-        $properties = [
-            'name' => (string) $name,
+        $driveItem = [
+            /*"audio" => [ "@odata.type" => "microsoft.graph.audio" ],
+            "content" => [ "@odata.type" => "Edm.Stream" ],
+            "cTag" => "string (etag)",
+            "deleted" => [ "@odata.type" => "microsoft.graph.deleted" ],
+            "description" => "string",
+            "file" => [ "@odata.type" => "microsoft.graph.file" ],
+            "fileSystemInfo" => [ "@odata.type" => "microsoft.graph.fileSystemInfo" ],*/
+            "folder" => [ "@odata.type" => "microsoft.graph.folder" ],
+/*            "image" => [ "@odata.type" => "microsoft.graph.image" ],
+            "location" => [ "@odata.type" => "microsoft.graph.geoCoordinates" ],
+            "malware" => [ "@odata.type" => "microsoft.graph.malware" ],
+            "package" => [ "@odata.type" => "microsoft.graph.package" ],
+            "photo" => [ "@odata.type" => "microsoft.graph.photo" ],
+            "publication" => [ "@odata.type" => "microsoft.graph.publicationFacet" ],
+            "remoteItem" => [ "@odata.type" => "microsoft.graph.remoteItem" ],
+            "root" => [ "@odata.type" => "microsoft.graph.root" ],
+            "searchResult" => [ "@odata.type" => "microsoft.graph.searchResult" ],
+            "shared" => [ "@odata.type" => "microsoft.graph.shared" ],
+            "sharepointIds" => [ "@odata.type" => "microsoft.graph.sharepointIds" ],
+            "size" => 1024,
+            "specialFolder" => [ "@odata.type" => "microsoft.graph.specialFolder" ],
+            "video" => [ "@odata.type" => "microsoft.graph.video" ],
+            "webDavUrl" => "string",*/
+
+            /* relationships */
+            /*"activities" => [[ "@odata.type" => "microsoft.graph.itemActivity" ]],
+            "children" => [[ "@odata.type" => "microsoft.graph.driveItem" ]],
+            "permissions" => [[ "@odata.type" => "microsoft.graph.permission" ]],
+            "thumbnails" => [[ "@odata.type" => "microsoft.graph.thumbnailSet" ]],
+            "versions" => [[ "@odata.type" => "microsoft.graph.driveItemVersion" ]],*/
+
+            /* inherited from baseItem */
+            /*"id" => "string (identifier)",
+            "createdBy" => [ "@odata.type" => "microsoft.graph.identitySet" ],
+            "createdDateTime" => "String (timestamp)",
+            "eTag" => "string",
+            "lastModifiedBy" => [ "@odata.type" => "microsoft.graph.identitySet" ],
+            "lastModifiedDateTime" => "String (timestamp)",*/
+            "name" => (string) $name,
+/*            "parentReference" => [ "@odata.type" => "microsoft.graph.itemReference" ],
+            "webUrl" => "string",*/
+
+            /* instance annotations */
+/*            "@microsoft.graph.conflictBehavior" => "string",
+            "@microsoft.graph.downloadUrl" => "url",
+            "@microsoft.graph.sourceUrl" => "url"*/
         ];
 
         if (null !== $description) {
-            $properties['description'] = (string) $description;
+            $driveItem['description'] = (string) $description;
         }
 
-        $folder = $this->apiPost($parentId, (object) $properties);
+        $driveItem = $this
+            ->graph
+            ->createRequest('POST', "/me/drive/$parent/children")
+            ->attachBody($driveItem)
+            ->setReturnType(Model\DriveItem::class)
+            ->execute();
 
-        return new Folder($this, $folder->id, $folder);
+        return new Folder($this, $driveItem->getId(), $driveItem);
     }
 
     /**
@@ -811,7 +895,7 @@ class Client
      * @throws \Exception
      *         Thrown on I/O errors.
      */
-    public function createFile(
+    public function _createFile(
         $name,
         $parentId = null,
         $content = '',
@@ -874,6 +958,35 @@ class Client
         return new File($this, $file->id, $file);
     }
 
+    public function createFile(
+        $name,
+        $parentId = null,
+        $content = '',
+        array $options = []
+    ) {
+        $name   = rawurlencode($name);
+        $parent = $parentId !== null ? "items/" . rawurlencode($parentId) : 'root';
+
+        // $options = array_merge([
+        //     'name_conflict_behavior' => $this->_nameConflictBehavior,
+        // ], $options);
+
+        // $params = $this
+        //     ->_nameConflictBehaviorParameterizer
+        //     ->parameterize([], $options['name_conflict_behavior']);
+
+        // $query = http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+
+        $driveItem = $this
+            ->graph
+            ->createRequest('PUT', "/me/drive/$parent:/$name:/content")
+            ->attachBody(is_resource($content) ? $content : Psr7\stream_for($content))
+            ->setReturnType(Model\DriveItem::class)
+            ->execute();
+
+        return new File($this, $driveItem->getId(), $driveItem);
+    }
+
     /**
      * Fetches a drive item from the current OneDrive account.
      *
@@ -881,20 +994,23 @@ class Client
      *        The unique ID of the OneDrive drive item to fetch, or null to
      *        fetch the OneDrive root folder. Default: null.
      *
-     * @return object
+     * @return Microsoft\Graph\Model\DriveItem
      *         The drive item fetched, as a DriveItem instance referencing to
      *         the OneDrive drive item fetched.
      */
     public function fetchDriveItem($driveItemId = null)
     {
-        $driveItemId = null !== $driveItemId ? $driveItemId : 'me/skydrive';
-        $result      = $this->apiGet($driveItemId);
+        $driveItemId = null !== $driveItemId ? 'items/' . rawurlencode($driveItemId) : 'root';
 
-        if (in_array($result->type, ['folder', 'album'])) {
-            return new Folder($this, $driveItemId, $result);
-        }
+        $driveItem = $this
+            ->graph
+            ->createRequest('GET', "/me/drive/$driveItemId")
+            ->setReturnType(Model\DriveItem::class)
+            ->execute();
 
-        return new File($this, $driveItemId, $result);
+        return $this->isFolder($driveItem) ?
+             new Folder($this, $driveItem->getId(), $driveItem)
+             : new File($this, $driveItem->getId(), $driveItem);
     }
 
     /**
@@ -915,6 +1031,8 @@ class Client
      * @return Folder
      *         The "Camera Roll" folder, as a Folder instance referencing to the
      *         OneDrive "Camera Roll" folder.
+     *
+     * @todo Convert to Graph.
      */
     public function fetchCameraRoll()
     {
@@ -927,6 +1045,8 @@ class Client
      * @return Folder
      *         The "Documents" folder, as a Folder instance referencing to the
      *         OneDrive "Documents" folder.
+     *
+     * @todo Convert to Graph.
      */
     public function fetchDocs()
     {
@@ -939,6 +1059,8 @@ class Client
      * @return Folder
      *         The "Pictures" folder, as a Folder instance referencing to the
      *         OneDrive "Pictures" folder.
+     *
+     * @todo Convert to Graph.
      */
     public function fetchPics()
     {
@@ -951,6 +1073,8 @@ class Client
      * @return Folder
      *         The "Public" folder, as a Folder instance referencing to the
      *         OneDrive "Public" folder.
+     *
+     * @todo Convert to Graph.
      */
     public function fetchPublicDocs()
     {
@@ -964,16 +1088,18 @@ class Client
      *        The drive item ID, or null to fetch the OneDrive root folder.
      *        Default: null.
      *
-     * @return object
+     * @return Microsoft\Graph\Model\DriveItem
      *         The properties of the drive item fetched.
      */
     public function fetchProperties($driveItemId = null)
     {
-        if (null === $driveItemId) {
-            $driveItemId = 'me/skydrive';
-        }
+        $driveItemId = null !== $driveItemId ? 'items/' . rawurlencode($driveItemId) : 'root';
 
-        return $this->apiGet($driveItemId);
+        return $this
+            ->graph
+            ->createRequest('GET', "/me/drive/$driveItemId")
+            ->setReturnType(Model\DriveItem::class)
+            ->execute();
     }
 
     /**
@@ -987,7 +1113,7 @@ class Client
      *         The drive items in the folder fetched, as DriveItem instances
      *         referencing OneDrive drive items.
      */
-    public function fetchDriveItems($driveItemId = null)
+    public function _fetchDriveItems($driveItemId = null)
     {
         if (null === $driveItemId) {
             $driveItemId = 'me/skydrive';
@@ -1007,6 +1133,25 @@ class Client
         return $driveItems;
     }
 
+    public function fetchDriveItems($driveItemId = null)
+    {
+        $driveItemId = null !== $driveItemId ? 'items/' . rawurlencode($driveItemId) : 'root';
+
+        $driveItems = $this
+            ->graph
+            ->createCollectionRequest('GET', "/me/drive/$driveItemId/children")
+            ->setReturnType(Model\DriveItem::class)
+            ->execute();
+
+        $self = $this;
+
+        return array_map(function (Model\DriveItem $driveItem) use ($self) {
+            return $self->isFolder($driveItem) ?
+                new Folder($this, $driveItem->getId(), $driveItem)
+                : new File($this, $driveItem->getId(), $driveItem);
+        }, $driveItems);
+    }
+
     /**
      * Updates the properties of a drive item in the current OneDrive account.
      *
@@ -1019,6 +1164,8 @@ class Client
      *
      * @throws \Exception
      *         Thrown on I/O errors.
+     *
+     * @todo Convert to Graph.
      */
     public function updateDriveItem($driveItemId, $properties = [], $temp = false)
     {
@@ -1049,8 +1196,10 @@ class Client
      * @param null|string $destinationId
      *        The unique ID of the folder into which to move the drive item, or
      *        null to move it to the OneDrive root folder. Default: null.
+     *
+     * @todo Convert to Graph.
      */
-    public function moveDriveItem($driveItemId, $destinationId = null)
+    public function _moveDriveItem($driveItemId, $destinationId = null)
     {
         if (null === $destinationId) {
             $destinationId = 'me/skydrive';
@@ -1059,6 +1208,22 @@ class Client
         $this->apiMove($driveItemId, [
             'destination' => $destinationId,
         ]);
+    }
+
+    public function moveDriveItem($driveItemId, $destinationId = null)
+    {
+        $payload = [
+            'parentReference' => [
+                'id' => $destinationId,
+            ],
+        ];
+
+        $this
+            ->graph
+            ->createRequest('PATCH', "/me/drive/items/$driveItemId")
+            ->attachBody($payload)
+            ->setReturnType(Model\DriveItem::class)
+            ->execute();
     }
 
     /**
@@ -1070,8 +1235,10 @@ class Client
      * @param null|string $destinationId
      *        The unique ID of the folder into which to copy the file, or null
      *        to copy it to the OneDrive root folder. Default: null.
+     *
+     * @todo Convert to Graph.
      */
-    public function copyFile($driveItemId, $destinationId = null)
+    public function _copyFile($driveItemId, $destinationId = null)
     {
         if (null === $destinationId) {
             $destinationId = 'me/skydrive';
@@ -1082,6 +1249,24 @@ class Client
         ]);
     }
 
+    public function copyFile($driveItemId, $destinationId = null)
+    {
+//        $destinationId = null !== $destinationId ? 'root';
+
+        $payload = [
+            'parentReference' => [
+                'id' => $destinationId,
+            ],
+        ];
+
+        $this
+            ->graph
+            ->createRequest('POST', "/me/drive/items/$driveItemId/copy")
+            ->attachBody($payload)
+            ->setReturnType(Model\DriveItem::class)
+            ->execute();
+    }
+
     /**
      * Deletes a drive item in the current OneDrive account.
      *
@@ -1090,7 +1275,10 @@ class Client
      */
     public function deleteDriveItem($driveItemId)
     {
-        $this->apiDelete($driveItemId);
+        $this
+            ->graph
+            ->createRequest('DELETE', "/me/drive/items/$driveItemId")
+            ->execute();
     }
 
     /**
@@ -1100,6 +1288,8 @@ class Client
      *         An object with the following properties:
      *           - 'quota' (int) The total space, in bytes.
      *           - 'available' (int) The available space, in bytes.
+     *
+     * @todo Convert to Graph.
      */
     public function fetchQuota()
     {
@@ -1117,6 +1307,8 @@ class Client
      *           - 'name' (string) Account owner's full name.
      *           - 'gender' (string) Account owner's gender.
      *           - 'locale' (string) Account owner's locale.
+     *
+     * @todo Convert to Graph.
      */
     public function fetchAccountInfo()
     {
@@ -1129,6 +1321,8 @@ class Client
      * @return object
      *         An object with the following properties:
      *           - 'data' (array) The list of the recent documents uploaded.
+     *
+     * @todo Convert to Graph.
      */
     public function fetchRecentDocs()
     {
@@ -1141,6 +1335,8 @@ class Client
      * @return object
      *         An object with the following properties:
      *           - 'data' (array) The list of the shared drive items.
+     *
+     * @todo Convert to Graph.
      */
     public function fetchShared()
     {
@@ -1160,5 +1356,19 @@ class Client
     public function log($level, $message, array $context = [])
     {
         $this->_logger->log($level, $message, $context);
+    }
+
+    /**
+     * Checks whether a given drive item is a folder.
+     *
+     * @param object $driveItem
+     *        The drive item.
+     *
+     * @return bool
+     *         Whether the drive item is a folder.
+     */
+    private function isFolder(Model\DriveItem $driveItem)
+    {
+        return null !== $driveItem->getFolder() || null !== $driveItem->getSpecialFolder();
     }
 }

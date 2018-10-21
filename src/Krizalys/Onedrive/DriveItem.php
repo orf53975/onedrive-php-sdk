@@ -2,6 +2,8 @@
 
 namespace Krizalys\Onedrive;
 
+use Psr\Log\LogLevel;
+
 /**
  * @class DriveItem
  *
@@ -29,10 +31,9 @@ abstract class DriveItem
 
     /**
      * @var string
-     *      The unique ID assigned by OneDrive to the parent folder of this
-     *      drive item.
+     *      A reference to the parent drive item of this drive item.
      */
-    private $_parentId;
+    private $_parentReference;
 
     /**
      * @var string
@@ -102,14 +103,9 @@ abstract class DriveItem
         $this->_client = $client;
         $this->_id     = null !== $id ? (string) $id : null;
 
-        $this->_parentId = property_exists($options, 'parent_id') ?
-            (string) $options->parent_id : null;
-
-        $this->_name = property_exists($options, 'name') ?
-            (string) $options->name : null;
-
-        $this->_description = property_exists($options, 'description') ?
-            (string) $options->description : null;
+        $this->_parentReference = $options->getParentReference();
+        $this->_name            = $options->getName();
+        $this->_description     = $options->getDescription();
 
         $this->_size = property_exists($options, 'size') ?
             (int) $options->size : null;
@@ -148,15 +144,10 @@ abstract class DriveItem
      */
     public function fetchProperties()
     {
-        $result = $this->_client->fetchProperties($this->_id);
-
-        $this->_parentId = '' != $result->parent_id ?
-            (string) $result->parent_id : null;
-
-        $this->_name = $result->name;
-
-        $this->_description = '' != $result->description ?
-            (string) $result->description : null;
+        $result                 = $this->_client->fetchProperties($this->_id);
+        $this->_parentReference = $result->getParentReference();
+        $this->_name            = $result->getName();
+        $this->_description     = $result->getDescription();
 
         $this->_size = (int) $result->size;
 
@@ -192,11 +183,34 @@ abstract class DriveItem
      */
     public function getParentId()
     {
-        if (null === $this->_parentId) {
+        $message = sprintf(
+            '%s() is deprecated and will be removed in a future version;'
+                . ' use %s::getParentReference()->getId() instead',
+            __METHOD__,
+            __CLASS__
+        );
+
+        $this->_client->log(LogLevel::WARNING, $message);
+
+        if (null === $this->_parentReference) {
             $this->fetchProperties();
         }
 
-        return $this->_parentId;
+        return $this->_parentReference->getId();
+    }
+
+    /**
+     * Gets a reference to the parent drive item of this drive item.
+     *
+     * @return object A reference to the parent drive item of this drive item.
+     */
+    public function getParentReference()
+    {
+        if (null === $this->_parentReference) {
+            $this->fetchProperties();
+        }
+
+        return $this->_parentReference;
     }
 
     /**

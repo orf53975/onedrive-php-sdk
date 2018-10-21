@@ -42,7 +42,12 @@ class File extends DriveItem
      */
     public function fetchContent(array $options = [])
     {
-        return $this->_client->apiGet($this->_id . '/content', $options);
+        return $this
+            ->_client
+            ->graph
+            ->createRequest('GET', '/me/drive/items/' . $this->_id . '/content')
+            ->execute()
+            ->getRawBody();
     }
 
     /**

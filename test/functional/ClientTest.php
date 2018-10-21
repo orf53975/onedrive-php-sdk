@@ -9,6 +9,9 @@ use Facebook\WebDriver\WebDriverBy;
 use Facebook\WebDriver\WebDriverExpectedCondition;
 use Krizalys\Onedrive\Client;
 use Krizalys\Onedrive\DriveItem;
+use Krizalys\Onedrive\Proxy\DriveItemProxy;
+use Krizalys\Onedrive\Proxy\DriveProxy;
+use Krizalys\Onedrive\Proxy\ItemReferenceProxy;
 use Krizalys\Onedrive\StreamBackEnd;
 use Symfony\Component\Process\Process;
 
@@ -41,7 +44,7 @@ EOF;
             'stream_back_end' => StreamBackEnd::TEMP,
         ]);
 
-        $code = self::getAuthenticationCodeWithManualLogIn/*getAuthenticationCode*/(
+        $code = self::/*getAuthenticationCodeWithManualLogIn*/getAuthenticationCode(
             $client,
             $config['CLIENT_ID'],
             $config['USERNAME'],
@@ -52,7 +55,336 @@ EOF;
         self::$client = $client;
     }
 
-    public function testCreateFolder()
+    public function testGetDrives()
+    {
+        $drives = self::$client->getDrives();
+        $this->assertGreaterThanOrEqual(1, count($drives));
+
+        foreach ($drives as $drive) {
+            $this->assertInstanceOf(DriveProxy::class, $drive);
+        }
+    }
+
+    public function testGetDriveById()
+    {
+        $drive = self::getFirstDrive();
+        $drive = self::$client->getDriveById($drive->id);
+        $this->assertInstanceOf(DriveProxy::class, $drive);
+        //"activities": [{"@odata.type": "microsoft.graph.itemActivity"}],
+        $this->assertNotNull($drive->id);
+        //"createdBy": { "@odata.type": "microsoft.graph.identitySet" },
+
+        $this->assertThat(
+            $drive->createdDateTime,
+            $this->logicalOr(
+                $this->isNull(),
+                $this->isInstanceOf(\DateTime::class)
+            )
+        );
+
+        //$this->assertNotNull($drive->description);
+        $this->assertNotNull($drive->driveType);
+        $this->assertContains($drive->driveType, ['personal', 'business', 'documentLibrary']);
+        //"items": [ { "@odata.type": "microsoft.graph.driveItem" } ],
+        //"lastModifiedBy": { "@odata.type": "microsoft.graph.identitySet" },
+
+        $this->assertThat(
+            $drive->lastModifiedDateTime,
+            $this->logicalOr(
+                $this->isNull(),
+                $this->isInstanceOf(\DateTime::class)
+            )
+        );
+
+        //$this->assertNotNull($drive->name);
+        //"owner": { "@odata.type": "microsoft.graph.identitySet" },
+
+        // Quota.
+        $this->assertNotNull($drive->quota);
+        $this->assertGreaterThanOrEqual(0, $drive->quota->deleted);
+        $this->assertGreaterThanOrEqual(0, $drive->quota->remaining);
+        $this->assertNotNull($drive->quota->state);
+        $this->assertContains($drive->quota->state, ['normal', 'nearing', 'critical', 'exceeded']);
+        $this->assertGreaterThanOrEqual(0, $drive->quota->total);
+        $this->assertGreaterThanOrEqual(0, $drive->quota->used);
+
+        //$this->assertNotNull($drive->root);// { "@odata.type": "microsoft.graph.driveItem" },
+        //"sharepointIds": { "@odata.type": "microsoft.graph.sharepointIds" },
+        //"special": [ { "@odata.type": "microsoft.graph.driveItem" }],
+        //"system": { "@odata.type": "microsoft.graph.systemFacet" },
+
+        $this->assertThat(
+            $drive->webUrl,
+            $this->logicalOr(
+                $this->isNull(),
+                $this->matchesRegularExpression('|^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)(\?([^#]*))?(#(.*))?|')
+            )
+        );
+    }
+
+    public function testGetDriveItemById()
+    {
+        //$drive = self::getFirstDrive();
+        $item = self::getRoot();
+        $item = self::$client->getDriveItemById($item->parentReference->driveId, $item->id);
+        $this->assertInstanceOf(DriveItemProxy::class, $item);
+        /* inherited from baseItem */
+        $this->assertNotNull($item->id);
+        /*"createdBy" => [ "@odata.type" => "microsoft.graph.identitySet" ],*/
+
+        $this->assertThat(
+            $item->createdDateTime,
+            $this->logicalOr(
+                $this->isNull(),
+                $this->isInstanceOf(\DateTime::class)
+            )
+        );
+
+        $this->assertNotNull($item->eTag);
+        /*"lastModifiedBy" => [ "@odata.type" => "microsoft.graph.identitySet" ],*/
+
+        $this->assertThat(
+            $item->lastModifiedDateTime,
+            $this->logicalOr(
+                $this->isNull(),
+                $this->isInstanceOf(\DateTime::class)
+            )
+        );
+
+        $this->assertNotNull($item->name);
+        /*"parentReference" => [ "@odata.type" => "microsoft.graph.itemReference" ],*/
+
+        $this->assertThat(
+            $item->webUrl,
+            $this->logicalOr(
+                $this->isNull(),
+                $this->matchesRegularExpression('|^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)(\?([^#]*))?(#(.*))?|')
+            )
+        );
+
+        /*"audio" => [ "@odata.type" => "microsoft.graph.audio" ],
+        "content" => [ "@odata.type" => "Edm.Stream" ],*/
+        //$this->assertNotNull($item->cTag);
+        /*"deleted" => [ "@odata.type" => "microsoft.graph.deleted" ],
+        "description" => "string",
+        "file" => [ "@odata.type" => "microsoft.graph.file" ],
+        "fileSystemInfo" => [ "@odata.type" => "microsoft.graph.fileSystemInfo" ],*/
+        //"folder" => [ "@odata.type" => "microsoft.graph.folder" ],
+        /*"image" => [ "@odata.type" => "microsoft.graph.image" ],
+        "location" => [ "@odata.type" => "microsoft.graph.geoCoordinates" ],
+        "malware" => [ "@odata.type" => "microsoft.graph.malware" ],
+        "package" => [ "@odata.type" => "microsoft.graph.package" ],
+        "photo" => [ "@odata.type" => "microsoft.graph.photo" ],
+        "publication" => [ "@odata.type" => "microsoft.graph.publicationFacet" ],
+        "remoteItem" => [ "@odata.type" => "microsoft.graph.remoteItem" ],
+        "root" => [ "@odata.type" => "microsoft.graph.root" ],
+        "searchResult" => [ "@odata.type" => "microsoft.graph.searchResult" ],
+        "shared" => [ "@odata.type" => "microsoft.graph.shared" ],
+        "sharepointIds" => [ "@odata.type" => "microsoft.graph.sharepointIds" ],
+        "size" => 1024,
+        "specialFolder" => [ "@odata.type" => "microsoft.graph.specialFolder" ],
+        "video" => [ "@odata.type" => "microsoft.graph.video" ],*/
+
+        $this->assertThat(
+            $item->webDavUrl,
+            $this->logicalOr(
+                $this->isNull(),
+                $this->matchesRegularExpression('|^(([^:/?#]+):)?(//([^/?#]*))?([^?#]*)(\?([^#]*))?(#(.*))?|')
+            )
+        );
+
+        /* relationships */
+        /*"activities" => [[ "@odata.type" => "microsoft.graph.itemActivity" ]],
+        "children" => [[ "@odata.type" => "microsoft.graph.driveItem" ]],
+        "permissions" => [[ "@odata.type" => "microsoft.graph.permission" ]],
+        "thumbnails" => [[ "@odata.type" => "microsoft.graph.thumbnailSet" ]],
+        "versions" => [[ "@odata.type" => "microsoft.graph.driveItemVersion" ]],*/
+
+        /* instance annotations */
+        /*"@microsoft.graph.conflictBehavior" => "string",
+        "@microsoft.graph.downloadUrl" => "url",
+        "@microsoft.graph.sourceUrl" => "url"*/
+    }
+
+    public function testGetRoot()
+    {
+        $root = self::$client->getRoot();
+        $this->assertInstanceOf(DriveItemProxy::class, $root);
+        $this->assertInstanceOf(ItemReferenceProxy::class, $root->parentReference);
+        $this->assertNull($root->parentReference->id);
+        $this->assertNotNull($root->parentReference->driveId);
+        $this->assertNotNull($root->parentReference->driveType);
+
+        return [$root];
+    }
+
+    /**
+     * @depends testGetRoot
+     */
+    public function testCreateFolder(array $arguments)
+    {
+        $root = $arguments[0];
+
+        $driveItem = $root->createFolder(
+            'Test folder',
+            [
+                'description' => 'Test description',
+            ]
+        );
+
+        $this->assertInstanceOf(DriveItemProxy::class, $driveItem);
+        $this->assertEquals('Test folder', $driveItem->name);
+        $this->assertEquals('Test description', $driveItem->description);
+        self::delete($driveItem);
+    }
+
+    /**
+     * @depends testGetRoot
+     */
+    public function testGetChildren(array $arguments)
+    {
+        $root = $arguments[0];
+        $item = self::createFolder($root, 'Test children');
+        self::createFolder($item, 'Test folder');
+        self::upload($item, 'Test file');
+        $children = $item->getChildren();
+        $this->assertCount(2, $children);
+        $this->assertInstanceOf(DriveItemProxy::class, $children[0]);
+        $this->assertEquals('Test folder', $children[0]->name);
+        $this->assertInstanceOf(DriveItemProxy::class, $children[1]);
+        $this->assertEquals('Test file', $children[1]->name);
+        self::delete($item);
+    }
+
+    public function testDelete()
+    {
+        // ...
+    }
+
+    /**
+     * @depends testGetRoot
+     */
+    public function testUpload(array $arguments)
+    {
+        $root = $arguments[0];
+
+        $driveItem = $root->upload(
+            'Test file',
+            'Test content',
+            [
+                'Content-Type: text/plain',
+            ]
+        );
+
+        // String content.
+        $this->assertInstanceOf(DriveItemProxy::class, $driveItem);
+        $this->assertEquals('Test file', $driveItem->name);
+        $this->assertEquals('Test content', $driveItem->content);
+        self::delete($driveItem);
+
+        // Stream content.
+        /*$content = fopen('php://memory', 'rb+');
+        fwrite($content, 'Test content');
+        rewind($content);
+
+        $driveItem = $root->upload(
+            'Test file',
+            $content,
+            [
+                'Content-Type: text/plain',
+            ]
+        );
+
+        $this->assertInstanceOf(DriveItemProxy::class, $driveItem);
+        $this->assertEquals('Test file', $driveItem->name);
+        $this->assertEquals('Test content', $driveItem->content);
+        self::delete($driveItem);
+        fclose($content);*/
+    }
+
+    /**
+     * @depends testGetRoot
+     */
+    public function testMove(array $arguments)
+    {
+        $root   = $arguments[0];
+        $file   = self::upload($root, 'Test file');
+        $folder = self::createFolder($root, 'Test destination');
+
+        $item = $file->move(
+            $folder,
+            [
+                'name' => 'Test file (moved)',
+            ]
+        );
+
+        $this->assertInstanceOf(DriveItemProxy::class, $item);
+        $this->assertInstanceOf(ItemReferenceProxy::class, $item->parentReference);
+        $this->assertEquals($folder->id, $item->parentReference->id);
+        $this->assertEquals($item->name, 'Test file (moved)');
+        self::delete($file);
+        self::delete($folder);
+    }
+
+    /**
+     * @depends testGetRoot
+     */
+    public function testCopy(array $arguments)
+    {
+        $root   = $arguments[0];
+        $file   = self::upload($root, 'Test file');
+        $folder = self::createFolder($root, 'Test destination');
+
+        $url = $file->copy(
+            $folder,
+            [
+                'name' => 'Test file (copied)',
+            ]
+        );
+
+/*        $this->assertInstanceOf(DriveItemProxy::class, $item);
+        $this->assertInstanceOf(ItemReferenceProxy::class, $item->parentReference);
+        $this->assertEquals($folder->id, $item->parentReference->id);
+        $this->assertEquals($item->name, 'Test file (copied)');
+        self::delete($item);*/
+        self::delete($file);
+        self::delete($folder);
+    }
+
+    private static function getFirstDrive()
+    {
+        $drives = self::$client->getDrives();
+        return $drives[0];
+    }
+
+    private static function getRoot()
+    {
+        return self::$client->getRoot();
+    }
+
+    private static function createFolder(DriveItemProxy $item, $name)
+    {
+        return $item->createFolder($name);
+    }
+
+    private static function upload(DriveItemProxy $item, $name)
+    {
+        return $item->upload(
+            $name,
+            '',
+            [
+                'Content-Type: text/plain',
+            ]
+        );
+    }
+
+    private static function delete(DriveItemProxy $item)
+    {
+        $item->delete();
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+    public function _testCreateFolder()
     {
         $root = self::$client->fetchDriveItem();
 
@@ -92,9 +424,9 @@ EOF;
     }
 
     /**
-     * @depends testCreateFolder
+     * @depends _testCreateFolder
      */
-    public function testCreateFile($arguments)
+    public function _testCreateFile($arguments)
     {
         $folder1 = $arguments[0];
         $folder2 = $arguments[1];
@@ -136,9 +468,9 @@ EOF;
     }
 
     /**
-     * @depends testCreateFile
+     * @depends _testCreateFile
      */
-    public function testMoveDriveItem($arguments)
+    public function _testMoveDriveItem($arguments)
     {
         $folder1 = $arguments[0];
         $folder2 = $arguments[1];
@@ -168,9 +500,9 @@ EOF;
     }
 
     /**
-     * @depends testMoveDriveItem
+     * @depends _testMoveDriveItem
      */
-    public function testCopyDriveItem($arguments)
+    public function _testCopyDriveItem($arguments)
     {
         $folder1 = $arguments[0];
         $folder2 = $arguments[1];
@@ -197,9 +529,9 @@ EOF;
     }
 
     /**
-     * @depends testCopyDriveItem
+     * @depends _testCopyDriveItem
      */
-    public function testDeleteDriveItem($arguments)
+    public function _testDeleteDriveItem($arguments)
     {
         $folder1 = $arguments[0];
         $folder2 = $arguments[1];
@@ -235,7 +567,16 @@ EOF;
     private static function getAuthenticationCodeWithManualLogIn(Client $client, $clientId, $username, $password)
     {
         $redirectUri = sprintf('http://localhost:%d/', self::PORT);
-        $logInUrl    = $client->getLogInUrl(['wl.skydrive_update'], $redirectUri);
+
+        $scopes = [
+            'offline_access',
+            'files.read',
+            'files.read.all',
+            'files.readwrite',
+            'files.readwrite.all',
+        ];
+
+        $logInUrl = $client->getLogInUrl($scopes, $redirectUri);
         echo "1. Visit $logInUrl\n";
         echo "2. Log in using your credentials ($username, $password)\n";
         echo "3. Paste the code in the query string\n";
@@ -259,7 +600,16 @@ EOF;
         $caps->setCapability(ChromeOptions::CAPABILITY, $opts);
         $seleniumUrl = sprintf('http://localhost:%d/wd/hub', 4444);
         $redirectUri = sprintf('http://localhost:%d/', self::PORT);
-        $logInUrl    = $client->getLogInUrl(['wl.skydrive_update'], $redirectUri);
+
+        $scopes = [
+            'offline_access',
+            'files.read',
+            'files.read.all',
+            'files.readwrite',
+            'files.readwrite.all',
+        ];
+
+        $logInUrl    = $client->getLogInUrl($scopes, $redirectUri);
         $webDriver   = RemoteWebDriver::create($seleniumUrl, $caps);
         $webDriver->get($logInUrl);
         $usernameLocator = WebDriverBy::id('i0116');

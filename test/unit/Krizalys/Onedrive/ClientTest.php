@@ -264,27 +264,6 @@ class ClientTest extends MockeryTestCase
         ], $actual);
     }
 
-    public function testApiPostShouldReturnExpectedValue()
-    {
-        GlobalNamespace::reset([
-            'curl_exec' => function ($expectation) {
-                $expectation->andReturn(json_encode((object) [
-                    'output_key' => 'output_value',
-                ]));
-            },
-        ]);
-
-        $actual = $this
-            ->client
-            ->apiPost('/path/to/resource', [
-                'input_key' => 'input_value',
-            ]);
-
-        $this->assertEquals((object) [
-            'output_key' => 'output_value',
-        ], $actual);
-    }
-
     public function testApiPutShouldReturnExpectedValue()
     {
         GlobalNamespace::reset([
@@ -300,25 +279,6 @@ class ClientTest extends MockeryTestCase
         $actual = $this
             ->client
             ->apiPut('/path/to/resource', $stream, 'text/plain');
-
-        $this->assertEquals((object) [
-            'key' => 'value',
-        ], $actual);
-    }
-
-    public function testApiDeleteShouldReturnExpectedValue()
-    {
-        GlobalNamespace::reset([
-            'curl_exec' => function ($expectation) {
-                $expectation->andReturn(json_encode((object) [
-                    'key' => 'value',
-                ]));
-            },
-        ]);
-
-        $actual = $this
-            ->client
-            ->apiDelete('/path/to/resource');
 
         $this->assertEquals((object) [
             'key' => 'value',
